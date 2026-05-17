@@ -34,16 +34,14 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.IndexedSprite;
 import net.runelite.api.ItemComposition;
-import net.runelite.api.MessageNode;
 import net.runelite.api.ScriptID;
-import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.RuneLite;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.chat.ChatCommandManager;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -58,12 +56,12 @@ import net.runelite.client.util.ImageUtil;
 @Slf4j
 @PluginDescriptor(
 	name = "Collection Log Commands",
-	description = "Adds !log command support for Collection Log pages",
+	description = "Adds ::log command support for Collection Log pages",
 	tags = {"collection", "log", "clog", "commands"}
 )
 public class CollectionLogCommandsPlugin extends Plugin
 {
-	private static final String COMMAND = "!log";
+	private static final String COMMAND = "log";
 	private static final File CACHE_DIR = new File(RuneLite.RUNELITE_DIR, "collection-log-commands");
 	private static final Type CACHE_TYPE = new TypeToken<Map<String, CollectionLogEntry>>(){}.getType();
 	private static final Map<String, String> ENTRY_ALIASES = buildEntryAliases();
@@ -73,12 +71,10 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static final int VERBOSE_CHAT_ICON_HEIGHT = 16;
 	private static final int CONDENSED_CHAT_ICON_WIDTH = 16;
 	private static final int CONDENSED_CHAT_ICON_HEIGHT = 16;
-	private static final int CHAT_REWRITE_DELAY_MILLIS = 350;
 	private static final int CACHE_HINT_DELAY_SECONDS = 8;
 
 	@Inject private Client client;
 	@Inject private ClientThread clientThread;
-	@Inject private ChatCommandManager chatCommandManager;
 	@Inject private ItemManager itemManager;
 	@Inject private ClientToolbar clientToolbar;
 	@Inject private Gson gson;
@@ -119,13 +115,11 @@ public class CollectionLogCommandsPlugin extends Plugin
 			.build();
 
 		clientToolbar.addNavigation(navButton);
-		chatCommandManager.registerCommand(COMMAND, this::handleLogCommand);
 	}
 
 	@Override
 	protected void shutDown()
 	{
-		chatCommandManager.unregisterCommand(COMMAND);
 		clientToolbar.removeNavigation(navButton);
 		entriesByName.clear();
 		chatSpriteIds.clear();
@@ -135,6 +129,17 @@ public class CollectionLogCommandsPlugin extends Plugin
 			ioExecutor.shutdownNow();
 			ioExecutor = null;
 		}
+	}
+
+	@Subscribe
+	public void onCommandExecuted(CommandExecuted event)
+	{
+		if (!event.getCommand().equalsIgnoreCase(COMMAND))
+		{
+			return;
+		}
+
+		handleLogCommand(String.join(" ", event.getArguments()));
 	}
 
 	@Subscribe
@@ -158,7 +163,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 		}
 	}
 
-	private void handleLogCommand(ChatMessage chatMessage, String message)
+	private void handleLogCommand(String input)
 	{
 		ensureCacheLoadedForCurrentPlayer();
 
@@ -168,39 +173,34 @@ public class CollectionLogCommandsPlugin extends Plugin
 			return;
 		}
 		// Defer execution behind the IO queue so any in-flight load completes first (FIFO).
-		scheduledExecutorService.schedule(
-			() -> executor.execute(() -> clientThread.invoke(() -> processLogCommand(chatMessage, message))),
-			CHAT_REWRITE_DELAY_MILLIS,
-			TimeUnit.MILLISECONDS);
+		executor.execute(() -> clientThread.invoke(() -> processLogCommand(input)));
 	}
 
-	private void processLogCommand(ChatMessage chatMessage, String message)
+	private void processLogCommand(String input)
 	{
-		String input = message.length() > COMMAND.length()
-			? message.substring(COMMAND.length()).trim()
-			: "";
+		input = input.trim();
 
 		if (input.isEmpty())
 		{
-			reply(chatMessage, formatHelp());
+			reply(formatHelp());
 			return;
 		}
 
 		if (input.equalsIgnoreCase("help"))
 		{
-			reply(chatMessage, formatHelp());
+			reply(formatHelp());
 			return;
 		}
 
 		if (input.equalsIgnoreCase("aliases"))
 		{
-			reply(chatMessage, formatAliases());
+			reply(formatAliases());
 			return;
 		}
 
 		if (input.equalsIgnoreCase("summary"))
 		{
-			reply(chatMessage, formatSummary());
+			reply(formatSummary());
 			return;
 		}
 
@@ -220,7 +220,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 		if (input.isEmpty())
 		{
-			reply(chatMessage, "Usage: !log missing <entry>");
+			reply("Usage: ::log missing <entry>");
 			return;
 		}
 
@@ -228,8 +228,8 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 		if (matches.isEmpty())
 		{
-			log.debug("clog !log no match for '{}' (needle='{}'), cached keys: {}", input, normalize(input), entriesByName.keySet());
-			reply(chatMessage, "No cached collection log entry found for \"" + input + "\". Open that Collection Log page once, or check spelling.");
+			log.debug("clog ::log no match for '{}' (needle='{}'), cached keys: {}", input, normalize(input), entriesByName.keySet());
+			reply("No cached collection log entry found for \"" + input + "\". Open that Collection Log page once, or check spelling.");
 			return;
 		}
 
@@ -240,11 +240,11 @@ public class CollectionLogCommandsPlugin extends Plugin
 				.map(CollectionLogEntry::getName)
 				.collect(Collectors.joining(", "));
 
-			reply(chatMessage, "Did you mean: " + names + "?");
+			reply("Did you mean: " + names + "?");
 			return;
 		}
 
-		displayEntry(chatMessage, matches.get(0), showMissing);
+		displayEntry(matches.get(0), showMissing);
 	}
 
 	private List<CollectionLogEntry> findMatches(String input)
@@ -334,14 +334,14 @@ public class CollectionLogCommandsPlugin extends Plugin
 	{
 		return new ChatMessageBuilder()
 			.append(HEADER_COLOR, "Collection Log Commands: ")
-			.append(ITEM_COLOR, "!log <entry>, !log <entry> missing, !log aliases, !log summary. Open each Collection Log page once to cache it.")
+			.append(ITEM_COLOR, "::log <entry>, ::log <entry> missing, ::log aliases, ::log summary. Open each Collection Log page once to cache it.")
 			.build();
 	}
 
 	private String formatAliases()
 	{
 		return new ChatMessageBuilder()
-			.append(HEADER_COLOR, "Common !log aliases: ")
+			.append(HEADER_COLOR, "Common ::log aliases: ")
 			.append(ITEM_COLOR, "cg, cox, cox cm, tob, tob hm, toa, toa expert, kbd, kq, corp, wt, gotr, pnm, jad, zuk")
 			.build();
 	}
@@ -362,9 +362,9 @@ public class CollectionLogCommandsPlugin extends Plugin
 			.build();
 	}
 
-	private void displayEntry(ChatMessage chatMessage, CollectionLogEntry entry, boolean showMissing)
+	private void displayEntry(CollectionLogEntry entry, boolean showMissing)
 	{
-		reply(chatMessage, formatEntry(entry, showMissing));
+		reply(formatEntry(entry, showMissing));
 	}
 
 	private void showCacheHintOnce()
@@ -381,7 +381,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 		scheduledExecutorService.schedule(() -> clientThread.invoke(() ->
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 				new ChatMessageBuilder()
-					.append(Color.RED, "Collection Log Commands: Open each Collection Log page once to cache it for !log commands.")
+					.append(Color.RED, "Collection Log Commands: Open each Collection Log page once to cache it for ::log commands.")
 					.build(),
 				null)),
 			CACHE_HINT_DELAY_SECONDS,
@@ -561,11 +561,9 @@ public class CollectionLogCommandsPlugin extends Plugin
 		return new File(CACHE_DIR, "cache_" + safe + ".json");
 	}
 
-	private void reply(ChatMessage chatMessage, String response)
+	private void reply(String response)
 	{
-		MessageNode node = chatMessage.getMessageNode();
-		node.setRuneLiteFormatMessage(response);
-		client.refreshChat();
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", response, null);
 	}
 
 	private static String normalize(String s)

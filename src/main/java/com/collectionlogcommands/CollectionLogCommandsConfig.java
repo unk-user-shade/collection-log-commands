@@ -12,7 +12,7 @@ public interface CollectionLogCommandsConfig extends Config
 	String CACHE_HINT_SHOWN_KEY = "cacheHintShown";
 
 	@ConfigSection(
-		name = "<html><body width='190'>[!] Open each Collection Log page once to cache it for !log commands.</body></html>",
+		name = "<html><body width='190'>[!] Open each Collection Log page once to cache it for ::log commands.</body></html>",
 		description = "Collection Log Commands cache reminder.",
 		position = 0
 	)
@@ -21,7 +21,7 @@ public interface CollectionLogCommandsConfig extends Config
 	@ConfigItem(
 		keyName = "outputMode",
 		name = "Output mode",
-		description = "Choose whether !log replies include item names or only compact item icons.",
+		description = "Choose whether ::log replies include item names or only compact item icons.",
 		position = 1,
 		section = cacheNoteSection
 	)
