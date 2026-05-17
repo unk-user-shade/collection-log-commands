@@ -68,10 +68,10 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static final Map<String, String> ENTRY_ALIASES = buildEntryAliases();
 	private static final Color HEADER_COLOR = new Color(128, 160, 255);
 	private static final Color ITEM_COLOR = Color.WHITE;
-	private static final int VERBOSE_CHAT_ICON_WIDTH = 15;
-	private static final int VERBOSE_CHAT_ICON_HEIGHT = 15;
-	private static final int CONDENSED_CHAT_ICON_WIDTH = 17;
-	private static final int CONDENSED_CHAT_ICON_HEIGHT = 17;
+	private static final int VERBOSE_CHAT_ICON_WIDTH = 16;
+	private static final int VERBOSE_CHAT_ICON_HEIGHT = 16;
+	private static final int CONDENSED_CHAT_ICON_WIDTH = 16;
+	private static final int CONDENSED_CHAT_ICON_HEIGHT = 16;
 	private static final int CHAT_REWRITE_DELAY_MILLIS = 350;
 
 	@Inject private Client client;
