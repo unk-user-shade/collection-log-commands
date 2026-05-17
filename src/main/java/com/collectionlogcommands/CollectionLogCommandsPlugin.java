@@ -37,6 +37,7 @@ import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.RuneLite;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatCommandManager;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.eventbus.Subscribe;
@@ -61,6 +62,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static final Type CACHE_TYPE = new TypeToken<Map<String, CollectionLogEntry>>(){}.getType();
 
 	@Inject private Client client;
+	@Inject private ClientThread clientThread;
 	@Inject private ChatCommandManager chatCommandManager;
 	@Inject private ItemManager itemManager;
 	@Inject private ClientToolbar clientToolbar;
@@ -135,6 +137,16 @@ public class CollectionLogCommandsPlugin extends Plugin
 	{
 		ensureCacheLoadedForCurrentPlayer();
 
+		if (ioExecutor == null)
+		{
+			return;
+		}
+		// Defer execution behind the IO queue so any in-flight load completes first (FIFO).
+		ioExecutor.execute(() -> clientThread.invoke(() -> processLogCommand(chatMessage, message)));
+	}
+
+	private void processLogCommand(ChatMessage chatMessage, String message)
+	{
 		String input = message.length() > COMMAND.length()
 			? message.substring(COMMAND.length()).trim()
 			: "";
