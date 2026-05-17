@@ -18,6 +18,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -55,24 +58,32 @@ public class CollectionLogCommandsPlugin extends Plugin
 {
 	private static final String COMMAND = "!log";
 	private static final File CACHE_DIR = new File(RuneLite.RUNELITE_DIR, "collection-log-commands");
-	private static final Gson GSON = new Gson();
 	private static final Type CACHE_TYPE = new TypeToken<Map<String, CollectionLogEntry>>(){}.getType();
 
 	@Inject private Client client;
 	@Inject private ChatCommandManager chatCommandManager;
 	@Inject private ItemManager itemManager;
 	@Inject private ClientToolbar clientToolbar;
+	@Inject private Gson gson;
 
-	private final Map<String, CollectionLogEntry> entriesByName = new HashMap<>();
+	private final Map<String, CollectionLogEntry> entriesByName = new ConcurrentHashMap<>();
 	private final Map<Integer, Integer> chatSpriteIds = new HashMap<>();
 
 	private CollectionLogCommandsPanel panel;
 	private NavigationButton navButton;
-	private String currentRsn;
+	private volatile String currentRsn;
+	private ExecutorService ioExecutor;
 
 	@Override
 	protected void startUp()
 	{
+		ioExecutor = Executors.newSingleThreadExecutor(r ->
+		{
+			Thread t = new Thread(r, "collection-log-commands-io");
+			t.setDaemon(true);
+			return t;
+		});
+
 		panel = new CollectionLogCommandsPanel(itemManager);
 
 		navButton = NavigationButton.builder()
@@ -92,6 +103,12 @@ public class CollectionLogCommandsPlugin extends Plugin
 		clientToolbar.removeNavigation(navButton);
 		entriesByName.clear();
 		chatSpriteIds.clear();
+		currentRsn = null;
+		if (ioExecutor != null)
+		{
+			ioExecutor.shutdownNow();
+			ioExecutor = null;
+		}
 	}
 
 	@Subscribe
@@ -299,14 +316,20 @@ public class CollectionLogCommandsPlugin extends Plugin
 			log.debug("clog no cache file yet for {}", rsn);
 			return;
 		}
+		ioExecutor.submit(() -> loadFromDisk(rsn, cacheFile));
+	}
+
+	private void loadFromDisk(String rsn, File cacheFile)
+	{
 		try (Reader r = new FileReader(cacheFile))
 		{
-			Map<String, CollectionLogEntry> loaded = GSON.fromJson(r, CACHE_TYPE);
-			if (loaded != null)
+			Map<String, CollectionLogEntry> loaded = gson.fromJson(r, CACHE_TYPE);
+			if (loaded == null || !rsn.equals(currentRsn))
 			{
-				entriesByName.putAll(loaded);
+				return;
 			}
-			log.debug("clog loaded {} entries for {} from {}", entriesByName.size(), rsn, cacheFile.getName());
+			entriesByName.putAll(loaded);
+			log.debug("clog loaded {} entries for {} from {}", loaded.size(), rsn, cacheFile.getName());
 		}
 		catch (Exception e)
 		{
@@ -316,16 +339,23 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 	private void saveCache()
 	{
-		if (currentRsn == null)
+		String rsn = currentRsn;
+		if (rsn == null || ioExecutor == null)
 		{
 			return;
 		}
-		File cacheFile = cacheFileFor(currentRsn);
+		Map<String, CollectionLogEntry> snapshot = new HashMap<>(entriesByName);
+		ioExecutor.submit(() -> writeToDisk(rsn, snapshot));
+	}
+
+	private void writeToDisk(String rsn, Map<String, CollectionLogEntry> snapshot)
+	{
+		File cacheFile = cacheFileFor(rsn);
 		cacheFile.getParentFile().mkdirs();
 		File tmp = new File(cacheFile.getPath() + ".tmp");
 		try (Writer w = new FileWriter(tmp))
 		{
-			GSON.toJson(entriesByName, w);
+			gson.toJson(snapshot, w);
 		}
 		catch (IOException e)
 		{

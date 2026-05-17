@@ -58,3 +58,8 @@ Java 11+ is required (the project targets Java 11 release).
 - Caching is driven by the `COLLECTION_DRAW_LIST` client script (id 2731), which fires every time a Collection Log entry page is drawn. The plugin reads the entry name from `InterfaceID.Collection.HEADER_TEXT` and the item grid from `InterfaceID.Collection.ITEMS_CONTENTS`.
 - Obtained vs. unobtained is detected via `Widget.getOpacity() == 0` (the same heuristic the official `chatcommands` plugin uses for pets).
 - Cache writes are atomic (`.tmp` then `Files.move` with `REPLACE_EXISTING, ATOMIC_MOVE`), so a crash mid-write can't corrupt the file.
+- All disk I/O happens on a dedicated single-thread executor; the client thread is never blocked on file reads or writes.
+
+## License
+
+BSD 2-Clause. See [LICENSE](LICENSE).
