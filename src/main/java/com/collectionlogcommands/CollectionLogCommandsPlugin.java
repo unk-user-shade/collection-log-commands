@@ -1,5 +1,6 @@
 package com.collectionlogcommands;
 
+import com.google.inject.Provides;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import java.awt.Color;
@@ -43,6 +44,7 @@ import net.runelite.client.RuneLite;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatCommandManager;
 import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
@@ -64,10 +66,12 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static final File CACHE_DIR = new File(RuneLite.RUNELITE_DIR, "collection-log-commands");
 	private static final Type CACHE_TYPE = new TypeToken<Map<String, CollectionLogEntry>>(){}.getType();
 	private static final Map<String, String> ENTRY_ALIASES = buildEntryAliases();
-	private static final Color HEADER_COLOR = Color.RED;
+	private static final Color HEADER_COLOR = new Color(128, 160, 255);
 	private static final Color ITEM_COLOR = Color.WHITE;
-	private static final int CHAT_ICON_WIDTH = 15;
-	private static final int CHAT_ICON_HEIGHT = 15;
+	private static final int VERBOSE_CHAT_ICON_WIDTH = 15;
+	private static final int VERBOSE_CHAT_ICON_HEIGHT = 15;
+	private static final int CONDENSED_CHAT_ICON_WIDTH = 17;
+	private static final int CONDENSED_CHAT_ICON_HEIGHT = 17;
 	private static final int CHAT_REWRITE_DELAY_MILLIS = 350;
 
 	@Inject private Client client;
@@ -77,14 +81,21 @@ public class CollectionLogCommandsPlugin extends Plugin
 	@Inject private ClientToolbar clientToolbar;
 	@Inject private Gson gson;
 	@Inject private ScheduledExecutorService scheduledExecutorService;
+	@Inject private CollectionLogCommandsConfig config;
 
 	private final Map<String, CollectionLogEntry> entriesByName = new ConcurrentHashMap<>();
-	private final Map<Integer, Integer> chatSpriteIds = new HashMap<>();
+	private final Map<String, Integer> chatSpriteIds = new HashMap<>();
 
 	private CollectionLogCommandsPanel panel;
 	private NavigationButton navButton;
 	private volatile String currentRsn;
 	private ExecutorService ioExecutor;
+
+	@Provides
+	CollectionLogCommandsConfig provideConfig(ConfigManager configManager)
+	{
+		return configManager.getConfig(CollectionLogCommandsConfig.class);
+	}
 
 	@Override
 	protected void startUp()
@@ -244,6 +255,16 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 	private String formatEntry(CollectionLogEntry entry, boolean showMissing)
 	{
+		if (config.outputMode() == CollectionLogOutputMode.CONDENSED)
+		{
+			return formatCondensedEntry(entry, showMissing);
+		}
+
+		return formatVerboseEntry(entry, showMissing);
+	}
+
+	private String formatVerboseEntry(CollectionLogEntry entry, boolean showMissing)
+	{
 		int total = entry.getItems().size();
 		long shownCount = showMissing ? total - entry.obtainedCount() : entry.obtainedCount();
 		String label = showMissing ? " missing  " : " collected  ";
@@ -258,8 +279,42 @@ public class CollectionLogCommandsPlugin extends Plugin
 			{
 				continue;
 			}
-			b.img(getChatSpriteId(item.getItemId()));
+			b.img(getChatSpriteId(item.getItemId(), VERBOSE_CHAT_ICON_WIDTH, VERBOSE_CHAT_ICON_HEIGHT));
 			b.append(ITEM_COLOR, " " + item.getName() + "  ");
+			any = true;
+		}
+
+		if (!any)
+		{
+			b.append(ITEM_COLOR, showMissing ? "complete!" : "nothing yet");
+		}
+
+		return b.build();
+	}
+
+	private String formatCondensedEntry(CollectionLogEntry entry, boolean showMissing)
+	{
+		int total = entry.getItems().size();
+		long shownCount = showMissing ? total - entry.obtainedCount() : entry.obtainedCount();
+		String suffix = showMissing ? " missing" : "";
+
+		ChatMessageBuilder b = new ChatMessageBuilder()
+			.append(HEADER_COLOR, entry.getName() + suffix + " (" + shownCount + "/" + total + "): ");
+
+		boolean any = false;
+		for (CollectionLogItem item : entry.getItems())
+		{
+			if (showMissing == item.isObtained())
+			{
+				continue;
+			}
+
+			b.img(getChatSpriteId(item.getItemId(), CONDENSED_CHAT_ICON_WIDTH, CONDENSED_CHAT_ICON_HEIGHT));
+			if (item.getQuantity() > 1)
+			{
+				b.append(HEADER_COLOR, " x" + item.getQuantity());
+			}
+			b.append(" ");
 			any = true;
 		}
 
@@ -308,9 +363,10 @@ public class CollectionLogCommandsPlugin extends Plugin
 		reply(chatMessage, formatEntry(entry, showMissing));
 	}
 
-	private int getChatSpriteId(int itemId)
+	private int getChatSpriteId(int itemId, int width, int height)
 	{
-		return chatSpriteIds.computeIfAbsent(itemId, id ->
+		String key = itemId + ":" + width + "x" + height;
+		return chatSpriteIds.computeIfAbsent(key, ignored ->
 		{
 			IndexedSprite[] old = client.getModIcons();
 			if (old == null)
@@ -321,10 +377,10 @@ public class CollectionLogCommandsPlugin extends Plugin
 			int index = old.length;
 			client.setModIcons(next);
 
-			AsyncBufferedImage image = itemManager.getImage(id);
+			AsyncBufferedImage image = itemManager.getImage(itemId);
 			image.onLoaded(() ->
 			{
-				BufferedImage resized = ImageUtil.resizeImage(image, CHAT_ICON_WIDTH, CHAT_ICON_HEIGHT);
+				BufferedImage resized = ImageUtil.resizeImage(image, width, height);
 				client.getModIcons()[index] = ImageUtil.getImageIndexedSprite(resized, client);
 			});
 
@@ -376,7 +432,8 @@ public class CollectionLogCommandsPlugin extends Plugin
 			}
 
 			boolean obtained = w.getOpacity() == 0;
-			items.add(new CollectionLogItem(itemId, name, obtained));
+			int quantity = Math.max(1, w.getItemQuantity());
+			items.add(new CollectionLogItem(itemId, name, obtained, quantity));
 		}
 
 		if (!items.isEmpty())
@@ -541,6 +598,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 		putAliases(aliases, "Gauntlet", "gaunt", "the gauntlet");
 		putAliases(aliases, "Corrupted Gauntlet", "cg", "cgaunt", "cgauntlet", "the corrupted gauntlet");
 		putAliases(aliases, "TzTok-Jad", "jad", "tzhaar fight cave");
+		putAliases(aliases, "TzHaar-Ket-Rak's Challenges", "jad 1", "jad 2", "jad 3", "jad 4", "jad 5", "jad 6");
 		putAliases(aliases, "TzKal-Zuk", "zuk", "inferno");
 		putAliases(aliases, "Sol Heredit", "sol", "colo", "colosseum", "fortis colosseum");
 		putAliases(aliases, "Chambers of Xeric", "cox", "xeric", "chambers", "olm", "raids");
@@ -551,6 +609,9 @@ public class CollectionLogCommandsPlugin extends Plugin
 		putAliases(aliases, "Tombs of Amascut: Entry Mode", "toa entry", "toa entry mode", "tombs of amascut - entry");
 		putAliases(aliases, "Tombs of Amascut", "toa", "tombs", "amascut", "warden", "wardens", "raids 3");
 		putAliases(aliases, "Tombs of Amascut: Expert Mode", "toa expert", "toa expert mode", "tombs of amascut - expert");
+		putRaidTeamAliases(aliases);
+		putAliases(aliases, "Brimhaven Agility Arena", "agility arena", "brimhaven", "brimhavan agility");
+		putAliases(aliases, "Hallowed Sepulchre", "hs", "hs1", "hs 1", "hs2", "hs 2", "hs3", "hs 3", "hs4", "hs 4", "hs5", "hs 5", "ghc", "sepulchre");
 		putAliases(aliases, "Wintertodt", "wt");
 		putAliases(aliases, "Tempoross", "fishingtodt", "fishtodt");
 		putAliases(aliases, "Guardians of the Rift", "gotr", "runetodt", "rifts closed");
@@ -563,6 +624,35 @@ public class CollectionLogCommandsPlugin extends Plugin
 		putAliases(aliases, "Crystal chest", "crystal chest");
 
 		return aliases;
+	}
+
+	private static void putRaidTeamAliases(Map<String, String> aliases)
+	{
+		putAliases(aliases, "Chambers of Xeric", "cox solo", "cox duo", "cox 24+");
+		putAliases(aliases, "Chambers of Xeric: Challenge Mode", "cox cm solo", "cox cm duo", "cox cm 24+");
+		for (int i = 1; i <= 24; i++)
+		{
+			putAliases(aliases, "Chambers of Xeric", "cox " + i);
+			putAliases(aliases, "Chambers of Xeric: Challenge Mode", "cox cm " + i);
+		}
+
+		putAliases(aliases, "Theatre of Blood", "tob solo", "tob duo");
+		putAliases(aliases, "Theatre of Blood: Hard Mode", "hmt solo", "hmt duo");
+		for (int i = 1; i <= 5; i++)
+		{
+			putAliases(aliases, "Theatre of Blood", "tob " + i);
+			putAliases(aliases, "Theatre of Blood: Hard Mode", "hmt " + i);
+		}
+
+		putAliases(aliases, "Tombs of Amascut: Entry Mode", "toa entry solo", "toa entry duo");
+		putAliases(aliases, "Tombs of Amascut", "toa solo", "toa duo");
+		putAliases(aliases, "Tombs of Amascut: Expert Mode", "toa expert solo", "toa expert duo");
+		for (int i = 1; i <= 8; i++)
+		{
+			putAliases(aliases, "Tombs of Amascut: Entry Mode", "toa entry " + i);
+			putAliases(aliases, "Tombs of Amascut", "toa " + i);
+			putAliases(aliases, "Tombs of Amascut: Expert Mode", "toa expert " + i);
+		}
 	}
 
 	private static void putAliases(Map<String, String> aliases, String entryName, String... values)

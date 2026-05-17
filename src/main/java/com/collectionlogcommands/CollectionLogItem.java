@@ -8,4 +8,5 @@ public class CollectionLogItem
 	int itemId;
 	String name;
 	boolean obtained;
+	int quantity;
 }
