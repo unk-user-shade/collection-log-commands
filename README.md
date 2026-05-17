@@ -72,6 +72,8 @@ The plugin learns collection log entries when you open them in-game. Once an ent
 - Cache files are stored per RuneScape character, so different accounts do not mix.
 - `!log summary` reports progress only across entries the plugin has cached.
 
+The plugin also shows a one-time in-game reminder after first login, and the settings panel includes the same cache reminder above the output mode dropdown.
+
 ## License
 
 BSD 2-Clause. See [LICENSE](LICENSE).

@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.IndexedSprite;
@@ -73,6 +74,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static final int CONDENSED_CHAT_ICON_WIDTH = 16;
 	private static final int CONDENSED_CHAT_ICON_HEIGHT = 16;
 	private static final int CHAT_REWRITE_DELAY_MILLIS = 350;
+	private static final int CACHE_HINT_DELAY_SECONDS = 8;
 
 	@Inject private Client client;
 	@Inject private ClientThread clientThread;
@@ -82,6 +84,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 	@Inject private Gson gson;
 	@Inject private ScheduledExecutorService scheduledExecutorService;
 	@Inject private CollectionLogCommandsConfig config;
+	@Inject private ConfigManager configManager;
 
 	private final Map<String, CollectionLogEntry> entriesByName = new ConcurrentHashMap<>();
 	private final Map<String, Integer> chatSpriteIds = new HashMap<>();
@@ -151,6 +154,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
 			ensureCacheLoadedForCurrentPlayer();
+			showCacheHintOnce();
 		}
 	}
 
@@ -225,7 +229,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 		if (matches.isEmpty())
 		{
 			log.debug("clog !log no match for '{}' (needle='{}'), cached keys: {}", input, normalize(input), entriesByName.keySet());
-			reply(chatMessage, "No collection log entry found for \"" + input + "\".");
+			reply(chatMessage, "No cached collection log entry found for \"" + input + "\". Open that Collection Log page once, or check spelling.");
 			return;
 		}
 
@@ -330,7 +334,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 	{
 		return new ChatMessageBuilder()
 			.append(HEADER_COLOR, "Collection Log Commands: ")
-			.append(ITEM_COLOR, "!log <entry>, !log <entry> missing, !log missing <entry>, !log aliases, !log summary")
+			.append(ITEM_COLOR, "!log <entry>, !log <entry> missing, !log aliases, !log summary. Open each Collection Log page once to cache it.")
 			.build();
 	}
 
@@ -361,6 +365,27 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private void displayEntry(ChatMessage chatMessage, CollectionLogEntry entry, boolean showMissing)
 	{
 		reply(chatMessage, formatEntry(entry, showMissing));
+	}
+
+	private void showCacheHintOnce()
+	{
+		if (config.cacheHintShown())
+		{
+			return;
+		}
+
+		configManager.setConfiguration(
+			CollectionLogCommandsConfig.GROUP,
+			CollectionLogCommandsConfig.CACHE_HINT_SHOWN_KEY,
+			true);
+		scheduledExecutorService.schedule(() -> clientThread.invoke(() ->
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				new ChatMessageBuilder()
+					.append(Color.RED, "Collection Log Commands: Open each Collection Log page once to cache it for !log commands.")
+					.build(),
+				null)),
+			CACHE_HINT_DELAY_SECONDS,
+			TimeUnit.SECONDS);
 	}
 
 	private int getChatSpriteId(int itemId, int width, int height)
