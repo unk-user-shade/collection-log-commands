@@ -2,6 +2,7 @@ package com.collectionlogcommands;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileReader;
@@ -13,6 +14,7 @@ import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -21,10 +23,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.IndexedSprite;
@@ -60,6 +63,12 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static final String COMMAND = "!log";
 	private static final File CACHE_DIR = new File(RuneLite.RUNELITE_DIR, "collection-log-commands");
 	private static final Type CACHE_TYPE = new TypeToken<Map<String, CollectionLogEntry>>(){}.getType();
+	private static final Map<String, String> ENTRY_ALIASES = buildEntryAliases();
+	private static final Color HEADER_COLOR = Color.RED;
+	private static final Color ITEM_COLOR = Color.WHITE;
+	private static final int CHAT_ICON_WIDTH = 15;
+	private static final int CHAT_ICON_HEIGHT = 15;
+	private static final int CHAT_REWRITE_DELAY_MILLIS = 350;
 
 	@Inject private Client client;
 	@Inject private ClientThread clientThread;
@@ -67,6 +76,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 	@Inject private ItemManager itemManager;
 	@Inject private ClientToolbar clientToolbar;
 	@Inject private Gson gson;
+	@Inject private ScheduledExecutorService scheduledExecutorService;
 
 	private final Map<String, CollectionLogEntry> entriesByName = new ConcurrentHashMap<>();
 	private final Map<Integer, Integer> chatSpriteIds = new HashMap<>();
@@ -137,12 +147,16 @@ public class CollectionLogCommandsPlugin extends Plugin
 	{
 		ensureCacheLoadedForCurrentPlayer();
 
-		if (ioExecutor == null)
+		ExecutorService executor = ioExecutor;
+		if (executor == null)
 		{
 			return;
 		}
 		// Defer execution behind the IO queue so any in-flight load completes first (FIFO).
-		ioExecutor.execute(() -> clientThread.invoke(() -> processLogCommand(chatMessage, message)));
+		scheduledExecutorService.schedule(
+			() -> executor.execute(() -> clientThread.invoke(() -> processLogCommand(chatMessage, message))),
+			CHAT_REWRITE_DELAY_MILLIS,
+			TimeUnit.MILLISECONDS);
 	}
 
 	private void processLogCommand(ChatMessage chatMessage, String message)
@@ -153,16 +167,46 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 		if (input.isEmpty())
 		{
-			reply(chatMessage, "Usage: !log <entry name> [missing]");
+			reply(chatMessage, formatHelp());
+			return;
+		}
+
+		if (input.equalsIgnoreCase("help"))
+		{
+			reply(chatMessage, formatHelp());
+			return;
+		}
+
+		if (input.equalsIgnoreCase("aliases"))
+		{
+			reply(chatMessage, formatAliases());
+			return;
+		}
+
+		if (input.equalsIgnoreCase("summary"))
+		{
+			reply(chatMessage, formatSummary());
 			return;
 		}
 
 		boolean showMissing = false;
+		if (input.regionMatches(true, 0, "missing ", 0, 8))
+		{
+			showMissing = true;
+			input = input.substring(8).trim();
+		}
+
 		int lastSpace = input.lastIndexOf(' ');
 		if (lastSpace > 0 && input.substring(lastSpace + 1).equalsIgnoreCase("missing"))
 		{
 			showMissing = true;
 			input = input.substring(0, lastSpace).trim();
+		}
+
+		if (input.isEmpty())
+		{
+			reply(chatMessage, "Usage: !log missing <entry>");
+			return;
 		}
 
 		List<CollectionLogEntry> matches = findMatches(input);
@@ -190,7 +234,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 	private List<CollectionLogEntry> findMatches(String input)
 	{
-		String needle = normalize(input);
+		String needle = normalize(resolveAlias(input));
 
 		return entriesByName.values().stream()
 			.filter(e -> normalize(e.getName()).contains(needle) || fuzzyScore(normalize(e.getName()), needle) <= 2)
@@ -198,14 +242,14 @@ public class CollectionLogCommandsPlugin extends Plugin
 			.collect(Collectors.toList());
 	}
 
-	private void displayEntry(ChatMessage chatMessage, CollectionLogEntry entry, boolean showMissing)
+	private String formatEntry(CollectionLogEntry entry, boolean showMissing)
 	{
 		int total = entry.getItems().size();
 		long shownCount = showMissing ? total - entry.obtainedCount() : entry.obtainedCount();
 		String label = showMissing ? " missing  " : " collected  ";
 
 		ChatMessageBuilder b = new ChatMessageBuilder()
-			.append(entry.getName() + ": " + shownCount + "/" + total + label);
+			.append(HEADER_COLOR, entry.getName() + ": " + shownCount + "/" + total + label);
 
 		boolean any = false;
 		for (CollectionLogItem item : entry.getItems())
@@ -215,16 +259,53 @@ public class CollectionLogCommandsPlugin extends Plugin
 				continue;
 			}
 			b.img(getChatSpriteId(item.getItemId()));
-			b.append(" " + item.getName() + "  ");
+			b.append(ITEM_COLOR, " " + item.getName() + "  ");
 			any = true;
 		}
 
 		if (!any)
 		{
-			b.append(showMissing ? "complete!" : "nothing yet");
+			b.append(ITEM_COLOR, showMissing ? "complete!" : "nothing yet");
 		}
 
-		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", b.build(), null);
+		return b.build();
+	}
+
+	private String formatHelp()
+	{
+		return new ChatMessageBuilder()
+			.append(HEADER_COLOR, "Collection Log Commands: ")
+			.append(ITEM_COLOR, "!log <entry>, !log <entry> missing, !log missing <entry>, !log aliases, !log summary")
+			.build();
+	}
+
+	private String formatAliases()
+	{
+		return new ChatMessageBuilder()
+			.append(HEADER_COLOR, "Common !log aliases: ")
+			.append(ITEM_COLOR, "cg, cox, cox cm, tob, tob hm, toa, toa expert, kbd, kq, corp, wt, gotr, pnm, jad, zuk")
+			.build();
+	}
+
+	private String formatSummary()
+	{
+		int entries = entriesByName.size();
+		int totalItems = entriesByName.values().stream()
+			.mapToInt(e -> e.getItems().size())
+			.sum();
+		long obtainedItems = entriesByName.values().stream()
+			.mapToLong(CollectionLogEntry::obtainedCount)
+			.sum();
+
+		return new ChatMessageBuilder()
+			.append(HEADER_COLOR, "Collection log cache: ")
+			.append(ITEM_COLOR, obtainedItems + "/" + totalItems + " items collected across " + entries + " cached entries")
+			.build();
+	}
+
+	private void displayEntry(ChatMessage chatMessage, CollectionLogEntry entry, boolean showMissing)
+	{
+		reply(chatMessage, formatEntry(entry, showMissing));
 	}
 
 	private int getChatSpriteId(int itemId)
@@ -232,14 +313,18 @@ public class CollectionLogCommandsPlugin extends Plugin
 		return chatSpriteIds.computeIfAbsent(itemId, id ->
 		{
 			IndexedSprite[] old = client.getModIcons();
-			IndexedSprite[] next = java.util.Arrays.copyOf(old, old.length + 1);
+			if (old == null)
+			{
+				old = new IndexedSprite[0];
+			}
+			IndexedSprite[] next = Arrays.copyOf(old, old.length + 1);
 			int index = old.length;
 			client.setModIcons(next);
 
 			AsyncBufferedImage image = itemManager.getImage(id);
 			image.onLoaded(() ->
 			{
-				BufferedImage resized = ImageUtil.resizeImage(image, 18, 16);
+				BufferedImage resized = ImageUtil.resizeImage(image, CHAT_ICON_WIDTH, CHAT_ICON_HEIGHT);
 				client.getModIcons()[index] = ImageUtil.getImageIndexedSprite(resized, client);
 			});
 
@@ -404,6 +489,88 @@ public class CollectionLogCommandsPlugin extends Plugin
 	private static String normalize(String s)
 	{
 		return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+	}
+
+	static String resolveAlias(String input)
+	{
+		return ENTRY_ALIASES.getOrDefault(normalize(input), input);
+	}
+
+	private static Map<String, String> buildEntryAliases()
+	{
+		Map<String, String> aliases = new HashMap<>();
+
+		putAliases(aliases, "Grotesque Guardians", "dusk", "dawn", "gargs", "ggs", "gg");
+		putAliases(aliases, "Abyssal Sire", "sire");
+		putAliases(aliases, "Cerberus", "cerb");
+		putAliases(aliases, "Thermonuclear Smoke Devil", "smoke devil", "thermy");
+		putAliases(aliases, "Alchemical Hydra", "hydra");
+		putAliases(aliases, "Amoxliatl", "amox");
+		putAliases(aliases, "Hueycoatl", "huey", "the hueycoatl");
+		putAliases(aliases, "Deranged Archaeologist", "deranged arch");
+		putAliases(aliases, "Crazy Archaeologist", "crazy arch");
+		putAliases(aliases, "Chaos Elemental", "chaos ele");
+		putAliases(aliases, "Vet'ion", "vetion");
+		putAliases(aliases, "Calvar'ion", "calv", "calvarion");
+		putAliases(aliases, "Venenatis", "vene");
+		putAliases(aliases, "King Black Dragon", "kbd");
+		putAliases(aliases, "Corporeal Beast", "corp");
+		putAliases(aliases, "Kalphite Queen", "kq");
+		putAliases(aliases, "Giant Mole", "mole");
+		putAliases(aliases, "Vorkath", "vork");
+		putAliases(aliases, "Phantom Muspah", "phantom", "muspah", "pm");
+		putAliases(aliases, "Nightmare", "nm", "tnm", "nmare", "the nightmare");
+		putAliases(aliases, "Phosani's Nightmare", "pnm", "phosani", "phosanis", "phosani nm", "phosani nightmare", "phosanis nightmare");
+		putAliases(aliases, "Commander Zilyana", "sara", "saradomin", "zilyana", "zily");
+		putAliases(aliases, "K'ril Tsutsaroth", "zammy", "zamorak", "kril", "kril trutsaroth");
+		putAliases(aliases, "Kree'arra", "arma", "kree", "kreearra", "armadyl");
+		putAliases(aliases, "General Graardor", "bando", "bandos", "graardor");
+		putAliases(aliases, "Dagannoth Supreme", "supreme");
+		putAliases(aliases, "Dagannoth Rex", "rex");
+		putAliases(aliases, "Dagannoth Prime", "prime");
+		putAliases(aliases, "Duke Sucellus", "duke");
+		putAliases(aliases, "Duke Sucellus (awakened)", "duke awakened", "duke sucellus awakened");
+		putAliases(aliases, "Leviathan", "levi", "the leviathan");
+		putAliases(aliases, "Leviathan (awakened)", "levi awakened", "leviathan awakened", "the leviathan awakened");
+		putAliases(aliases, "Vardorvis", "vard");
+		putAliases(aliases, "Vardorvis (awakened)", "vard awakened", "vardorvis awakened");
+		putAliases(aliases, "Whisperer", "wisp", "whisp", "the whisperer");
+		putAliases(aliases, "Whisperer (awakened)", "wisp awakened", "whisp awakened", "whisperer awakened");
+		putAliases(aliases, "Barrows Chests", "barrows");
+		putAliases(aliases, "Lunar Chest", "lunar chests", "moons of peril", "perilous moon", "perilous moons");
+		putAliases(aliases, "Gauntlet", "gaunt", "the gauntlet");
+		putAliases(aliases, "Corrupted Gauntlet", "cg", "cgaunt", "cgauntlet", "the corrupted gauntlet");
+		putAliases(aliases, "TzTok-Jad", "jad", "tzhaar fight cave");
+		putAliases(aliases, "TzKal-Zuk", "zuk", "inferno");
+		putAliases(aliases, "Sol Heredit", "sol", "colo", "colosseum", "fortis colosseum");
+		putAliases(aliases, "Chambers of Xeric", "cox", "xeric", "chambers", "olm", "raids");
+		putAliases(aliases, "Chambers of Xeric: Challenge Mode", "cox cm", "xeric cm", "chambers cm", "olm cm", "raids cm", "chambers of xeric - challenge mode");
+		putAliases(aliases, "Theatre of Blood: Entry Mode", "tob sm", "tob story mode", "tob story", "tob entry mode", "tob em", "tob entry");
+		putAliases(aliases, "Theatre of Blood", "tob", "theatre", "verzik", "verzik vitur", "raids 2");
+		putAliases(aliases, "Theatre of Blood: Hard Mode", "tob cm", "tob hm", "tob hard mode", "tob hard", "hmt");
+		putAliases(aliases, "Tombs of Amascut: Entry Mode", "toa entry", "toa entry mode", "tombs of amascut - entry");
+		putAliases(aliases, "Tombs of Amascut", "toa", "tombs", "amascut", "warden", "wardens", "raids 3");
+		putAliases(aliases, "Tombs of Amascut: Expert Mode", "toa expert", "toa expert mode", "tombs of amascut - expert");
+		putAliases(aliases, "Wintertodt", "wt");
+		putAliases(aliases, "Tempoross", "fishingtodt", "fishtodt");
+		putAliases(aliases, "Guardians of the Rift", "gotr", "runetodt", "rifts closed");
+		putAliases(aliases, "Hunter Rumours", "hunterrumour", "hunter contract", "hunter contracts", "hunter tasks", "hunter task", "rumours", "rumour");
+		putAliases(aliases, "Herbiboar", "herbi");
+		putAliases(aliases, "Bird's egg sacrifices", "bird egg", "bird eggs", "bird's egg", "bird's eggs");
+		putAliases(aliases, "Larran's big chest", "larran chest", "larran's chest", "larran big chest", "larran's big chest");
+		putAliases(aliases, "Larran's small chest", "larran small chest", "larran's small chest");
+		putAliases(aliases, "Brimstone chest", "brimstone chest");
+		putAliases(aliases, "Crystal chest", "crystal chest");
+
+		return aliases;
+	}
+
+	private static void putAliases(Map<String, String> aliases, String entryName, String... values)
+	{
+		for (String value : values)
+		{
+			aliases.put(normalize(value), entryName);
+		}
 	}
 
 	private static int fuzzyScore(String a, String b)

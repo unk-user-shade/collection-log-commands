@@ -8,14 +8,24 @@ A RuneLite plugin that adds an in-game `!log` chat command for sharing your Coll
 | --- | --- |
 | `!log <entry>` | `Entry: X/Y collected` followed by icons + names of the items you've obtained. |
 | `!log <entry> missing` | `Entry: X/Y missing` followed by icons + names of items you still need. |
-| `!log` | Reminds you of the usage. |
+| `!log missing <entry>` | Same as `!log <entry> missing`. |
+| `!log aliases` | Shows common shorthand examples such as `cg`, `cox`, `tob`, `toa`, `kbd`, `wt`, and `gotr`. |
+| `!log summary` | Shows total cached progress across every collection log entry the plugin knows about. |
+| `!log` / `!log help` | Shows command usage. |
 
 Entry matching is case-insensitive, ignores punctuation, and falls back to a fuzzy match if there's no exact substring hit. Multi-word entries work (`!log theatre of blood`, `!log larrans small chest`).
+
+The plugin rewrites the original chat message in place, similar to RuneLite's built-in chat commands. For example, after sending `!log zulrah`, the chat line updates to the formatted collection log output.
+
+Common RuneLite-style shorthand is supported for entries where players usually type abbreviations instead of full names, such as `!log cg`, `!log cox`, `!log cox cm`, `!log tob hm`, `!log toa expert`, `!log kbd`, `!log wt`, and `!log gotr`.
 
 Examples:
 ```
 !log zulrah          -> Zulrah: 5/10 collected [icons...]
 !log zulrah missing  -> Zulrah: 5/10 missing [icons...]
+!log missing zulrah  -> Zulrah: 5/10 missing [icons...]
+!log cg              -> Corrupted Gauntlet: 4/12 collected [icons...]
+!log summary         -> Collection log cache: 128/412 items collected across 37 cached entries
 !log araxxor         -> Araxxor: 2/10 collected [icons...]
 ```
 
