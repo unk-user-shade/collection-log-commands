@@ -2,8 +2,10 @@ package com.collectionlogcommands;
 
 import java.awt.BorderLayout;
 import java.awt.GridLayout;
+import java.util.List;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.PluginPanel;
 
@@ -21,22 +23,50 @@ public class CollectionLogCommandsPanel extends PluginPanel
 		content.add(cacheNote, BorderLayout.NORTH);
 		content.add(list, BorderLayout.CENTER);
 		add(content, BorderLayout.NORTH);
+		showCachedEntries(null);
 	}
 
 	public void showEntry(CollectionLogEntry entry)
 	{
-		list.removeAll();
-
-		list.add(new JLabel(entry.getName() + ": " + entry.obtainedCount() + "/" + entry.getItems().size()));
-
-		for (CollectionLogItem item : entry.getItems())
+		SwingUtilities.invokeLater(() ->
 		{
-			JLabel label = new JLabel((item.isObtained() ? "✓ " : "✗ ") + item.getName());
-			itemManager.getImage(item.getItemId()).addTo(label);
-			list.add(label);
-		}
+			list.removeAll();
 
-		revalidate();
-		repaint();
+			list.add(new JLabel(entry.getName() + ": " + entry.obtainedCount() + "/" + entry.getItems().size()));
+
+			for (CollectionLogItem item : entry.getItems())
+			{
+				JLabel label = new JLabel((item.isObtained() ? "✓ " : "✗ ") + item.getName());
+				itemManager.getImage(item.getItemId()).addTo(label);
+				list.add(label);
+			}
+
+			revalidate();
+			repaint();
+		});
+	}
+
+	public void showCachedEntries(List<CollectionLogEntry> entries)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			list.removeAll();
+
+			if (entries == null || entries.isEmpty())
+			{
+				list.add(new JLabel("No cached entries yet."));
+			}
+			else
+			{
+				list.add(new JLabel("Cached entries: " + entries.size()));
+				for (CollectionLogEntry entry : entries)
+				{
+					list.add(new JLabel(CollectionLogCommandsPlugin.formatCacheEntryLabel(entry)));
+				}
+			}
+
+			revalidate();
+			repaint();
+		});
 	}
 }

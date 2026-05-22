@@ -6,26 +6,45 @@ Commands use RuneLite's local `::` command syntax, so output is only shown to yo
 
 Examples:
 ```
+::log missing
 ::log zulrah
 ::log zulrah missing
 ::log missing zulrah
 ::log cg
 ::log cox cm
 ::log summary
+::log cached
+::log clear zulrah
 ```
 
 ## Commands
 
 | Command | Output |
 | --- | --- |
+| `::log missing` | Lists cached entries that are incomplete, with missing counts. |
 | `::log <entry>` | Shows your collected items for that collection log entry. |
 | `::log <entry> missing` | Shows the items you are still missing for that entry. |
 | `::log missing <entry>` | Same as `::log <entry> missing`. |
 | `::log aliases` | Shows common shorthand examples. |
 | `::log summary` | Shows total cached progress across every entry the plugin knows about. |
+| `::log cached` | Lists cached entries with collected/total counts. |
+| `::log clear <entry>` | Removes one cached entry for the current character. |
+| `::log clearcache` | Clears every cached entry for the current character. |
 | `::log` / `::log help` | Shows command usage. |
 
 If an entry is complete, `::log <entry> missing` shows `complete!`. If you have no obtained items for an entry, `::log <entry>` shows `nothing yet`.
+
+## Recommended Workflow
+
+Use `::log missing` as the main overview command. It reports only incomplete cached entries, such as `Zulrah (2 missing)`, so you can quickly see what still needs attention.
+
+Use `::log <entry> missing` when you want the actual missing item names and icons for one entry:
+
+```
+::log zulrah missing
+```
+
+Use `::log cached` when you want to audit what pages the plugin has cached. This can be noisy if you have opened many Collection Log pages.
 
 ## Output Modes
 
@@ -70,7 +89,11 @@ The plugin learns collection log entries when you open them in-game. Once an ent
 - Open a collection log page once to cache its item list and obtained/missing state.
 - Re-open a page after getting new drops to update that cached entry.
 - Cache files are stored per RuneScape character, so different accounts do not mix.
+- The side panel lists cached entries and shows the selected entry after you run `::log <entry>`.
 - `::log summary` reports progress only across entries the plugin has cached.
+- `::log missing` shows which cached entries are incomplete.
+- `::log cached` shows which entries are currently cached.
+- `::log clear <entry>` and `::log clearcache` let you remove stale cached data.
 
 The plugin also shows a one-time in-game reminder after first login, and the settings panel includes the same cache reminder above the output mode dropdown.
 

@@ -204,6 +204,30 @@ public class CollectionLogCommandsPlugin extends Plugin
 			return;
 		}
 
+		if (input.equalsIgnoreCase("missing") || input.equalsIgnoreCase("incomplete"))
+		{
+			reply(formatMissingSummary());
+			return;
+		}
+
+		if (input.equalsIgnoreCase("cached") || input.equalsIgnoreCase("cache") || input.equalsIgnoreCase("entries") || input.equalsIgnoreCase("list"))
+		{
+			reply(formatCachedEntries());
+			return;
+		}
+
+		if (input.equalsIgnoreCase("clearcache") || input.equalsIgnoreCase("clear cache"))
+		{
+			clearCache();
+			return;
+		}
+
+		if (input.regionMatches(true, 0, "clear ", 0, 6))
+		{
+			clearCachedEntry(input.substring(6).trim());
+			return;
+		}
+
 		boolean showMissing = false;
 		if (input.regionMatches(true, 0, "missing ", 0, 8))
 		{
@@ -334,7 +358,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 	{
 		return new ChatMessageBuilder()
 			.append(HEADER_COLOR, "Collection Log Commands: ")
-			.append(ITEM_COLOR, "::log <entry>, ::log <entry> missing, ::log aliases, ::log summary. Open each Collection Log page once to cache it.")
+			.append(ITEM_COLOR, "::log <entry>, ::log <entry> missing, ::log missing, ::log cached, ::log clear <entry>, ::log clearcache, ::log aliases, ::log summary. Open each Collection Log page once to cache it.")
 			.build();
 	}
 
@@ -362,8 +386,103 @@ public class CollectionLogCommandsPlugin extends Plugin
 			.build();
 	}
 
+	private String formatCachedEntries()
+	{
+		if (entriesByName.isEmpty())
+		{
+			return new ChatMessageBuilder()
+				.append(HEADER_COLOR, "Cached collection log entries: ")
+				.append(ITEM_COLOR, "none yet. Open Collection Log pages once to cache them.")
+				.build();
+		}
+
+		String names = sortedCachedEntries().stream()
+			.map(CollectionLogCommandsPlugin::formatCacheEntryLabel)
+			.collect(Collectors.joining(", "));
+
+		return new ChatMessageBuilder()
+			.append(HEADER_COLOR, "Cached collection log entries: ")
+			.append(ITEM_COLOR, names)
+			.build();
+	}
+
+	private String formatMissingSummary()
+	{
+		if (entriesByName.isEmpty())
+		{
+			return new ChatMessageBuilder()
+				.append(HEADER_COLOR, "Missing cached collection log entries: ")
+				.append(ITEM_COLOR, "none cached yet. Open Collection Log pages once to cache them.")
+				.build();
+		}
+
+		List<CollectionLogEntry> incompleteEntries = sortedCachedEntries().stream()
+			.filter(e -> e.obtainedCount() < e.getItems().size())
+			.collect(Collectors.toList());
+
+		if (incompleteEntries.isEmpty())
+		{
+			return new ChatMessageBuilder()
+				.append(HEADER_COLOR, "Missing cached collection log entries: ")
+				.append(ITEM_COLOR, "none. Every cached entry is complete.")
+				.build();
+		}
+
+		String names = incompleteEntries.stream()
+			.map(CollectionLogCommandsPlugin::formatMissingEntryLabel)
+			.collect(Collectors.joining(", "));
+
+		return new ChatMessageBuilder()
+			.append(HEADER_COLOR, "Missing cached collection log entries: ")
+			.append(ITEM_COLOR, names)
+			.build();
+	}
+
+	private void clearCachedEntry(String input)
+	{
+		if (input.isEmpty())
+		{
+			reply("Usage: ::log clear <entry>");
+			return;
+		}
+
+		List<CollectionLogEntry> matches = findMatches(input);
+		if (matches.isEmpty())
+		{
+			reply("No cached collection log entry found for \"" + input + "\".");
+			return;
+		}
+
+		if (matches.size() > 1)
+		{
+			String names = matches.stream()
+				.limit(5)
+				.map(CollectionLogEntry::getName)
+				.collect(Collectors.joining(", "));
+
+			reply("Did you mean: " + names + "?");
+			return;
+		}
+
+		CollectionLogEntry entry = matches.get(0);
+		entriesByName.remove(normalize(entry.getName()));
+		saveCache();
+		updatePanelCacheList();
+		reply("Cleared cached collection log entry: " + entry.getName());
+	}
+
+	private void clearCache()
+	{
+		int count = entriesByName.size();
+		entriesByName.clear();
+		saveCache();
+		updatePanelCacheList();
+		reply("Cleared " + count + " cached collection log entries for the current character.");
+	}
+
 	private void displayEntry(CollectionLogEntry entry, boolean showMissing)
 	{
+		panel.showEntry(entry);
 		reply(formatEntry(entry, showMissing));
 	}
 
@@ -470,6 +589,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 				entriesByName.put(key, updated);
 				log.debug("clog cached entry '{}' with {} items, keys now: {}", entryName, items.size(), entriesByName.keySet());
 				saveCache();
+				updatePanelCacheList();
 			}
 		}
 	}
@@ -488,6 +608,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 
 		currentRsn = rsn;
 		entriesByName.clear();
+		updatePanelCacheList();
 
 		File cacheFile = cacheFileFor(rsn);
 		if (!cacheFile.exists())
@@ -508,6 +629,7 @@ public class CollectionLogCommandsPlugin extends Plugin
 				return;
 			}
 			entriesByName.putAll(loaded);
+			clientThread.invoke(this::updatePanelCacheList);
 			log.debug("clog loaded {} entries for {} from {}", loaded.size(), rsn, cacheFile.getName());
 		}
 		catch (Exception e)
@@ -566,6 +688,21 @@ public class CollectionLogCommandsPlugin extends Plugin
 		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", response, null);
 	}
 
+	private List<CollectionLogEntry> sortedCachedEntries()
+	{
+		return entriesByName.values().stream()
+			.sorted(Comparator.comparing(CollectionLogEntry::getName, String.CASE_INSENSITIVE_ORDER))
+			.collect(Collectors.toList());
+	}
+
+	private void updatePanelCacheList()
+	{
+		if (panel != null)
+		{
+			panel.showCachedEntries(sortedCachedEntries());
+		}
+	}
+
 	private static String normalize(String s)
 	{
 		return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
@@ -574,6 +711,17 @@ public class CollectionLogCommandsPlugin extends Plugin
 	static String resolveAlias(String input)
 	{
 		return ENTRY_ALIASES.getOrDefault(normalize(input), input);
+	}
+
+	static String formatCacheEntryLabel(CollectionLogEntry entry)
+	{
+		return entry.getName() + " (" + entry.obtainedCount() + "/" + entry.getItems().size() + ")";
+	}
+
+	static String formatMissingEntryLabel(CollectionLogEntry entry)
+	{
+		long missing = entry.getItems().size() - entry.obtainedCount();
+		return entry.getName() + " (" + missing + " missing)";
 	}
 
 	private static Map<String, String> buildEntryAliases()

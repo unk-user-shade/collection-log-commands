@@ -2,6 +2,7 @@ package com.collectionlogcommands;
 
 import static org.junit.Assert.assertEquals;
 
+import java.util.Arrays;
 import org.junit.Test;
 
 public class CollectionLogCommandsPluginUnitTest
@@ -38,5 +39,27 @@ public class CollectionLogCommandsPluginUnitTest
 		assertEquals("Wintertodt", CollectionLogCommandsPlugin.resolveAlias("wt"));
 		assertEquals("Guardians of the Rift", CollectionLogCommandsPlugin.resolveAlias("gotr"));
 		assertEquals("Larran's big chest", CollectionLogCommandsPlugin.resolveAlias("larran chest"));
+	}
+
+	@Test
+	public void formatsCacheEntryLabels()
+	{
+		CollectionLogEntry entry = new CollectionLogEntry("auto", "Zulrah", Arrays.asList(
+			new CollectionLogItem(1, "Tanzanite fang", true, 1),
+			new CollectionLogItem(2, "Magic fang", false, 1),
+			new CollectionLogItem(3, "Serpentine visage", true, 1)));
+
+		assertEquals("Zulrah (2/3)", CollectionLogCommandsPlugin.formatCacheEntryLabel(entry));
+	}
+
+	@Test
+	public void formatsMissingEntryLabels()
+	{
+		CollectionLogEntry entry = new CollectionLogEntry("auto", "Zulrah", Arrays.asList(
+			new CollectionLogItem(1, "Tanzanite fang", true, 1),
+			new CollectionLogItem(2, "Magic fang", false, 1),
+			new CollectionLogItem(3, "Serpentine visage", false, 1)));
+
+		assertEquals("Zulrah (2 missing)", CollectionLogCommandsPlugin.formatMissingEntryLabel(entry));
 	}
 }
